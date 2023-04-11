@@ -12,13 +12,17 @@ pub trait StaleNodeIndexSchemaTrait: Schema<Key = StaleNodeIndex>
 where
     StaleNodeIndex: KeyCodec<Self>,
 {
-    fn tag() -> DbMetadataKey;
+    fn tag(shard_id: Option<u8>) -> DbMetadataKey;
     fn name() -> &'static str;
 }
 
 impl StaleNodeIndexSchemaTrait for StaleNodeIndexSchema {
-    fn tag() -> DbMetadataKey {
-        DbMetadataKey::StateMerklePrunerProgress
+    fn tag(shard_id: Option<u8>) -> DbMetadataKey {
+        if let Some(shard_id) = shard_id {
+            DbMetadataKey::StateMerkleShardPrunerProgress(shard_id as usize)
+        } else {
+            DbMetadataKey::StateMerklePrunerProgress
+        }
     }
 
     fn name() -> &'static str {
@@ -27,8 +31,12 @@ impl StaleNodeIndexSchemaTrait for StaleNodeIndexSchema {
 }
 
 impl StaleNodeIndexSchemaTrait for StaleNodeIndexCrossEpochSchema {
-    fn tag() -> DbMetadataKey {
-        DbMetadataKey::EpochEndingStateMerklePrunerProgress
+    fn tag(shard_id: Option<u8>) -> DbMetadataKey {
+        if let Some(shard_id) = shard_id {
+            DbMetadataKey::EpochEndingStateMerkleShardPrunerProgress(shard_id as usize)
+        } else {
+            DbMetadataKey::EpochEndingStateMerklePrunerProgress
+        }
     }
 
     fn name() -> &'static str {
