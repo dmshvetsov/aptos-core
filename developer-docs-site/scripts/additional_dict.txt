@@ -109,6 +109,8 @@ Ethereum
 ExternalMarkdown
 FAQ
 FLAC
+FA
+FAs
 FT
 FTs
 Failover
@@ -326,6 +328,8 @@ data's
 deallocate
 debuggability
 deduping
+defi
+deletable
 deployer
 deprioritize
 dereference
@@ -351,6 +355,7 @@ fn
 fullnode
 fullnode's
 fullnodes
+fungibility
 gcloud
 gcp
 gcs
@@ -420,7 +425,6 @@ npmjs
 octa
 octas
 offchain
-on-chain
 onboarding
 onchain
 onwards
@@ -506,6 +510,7 @@ txns
 txt
 typesafe
 uint
+undeletable
 unexportable
 unixtime
 unmount

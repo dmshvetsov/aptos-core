@@ -200,7 +200,7 @@ const sidebars = {
       link: { type: "doc", id: "standards/index" },
       collapsible: true,
       collapsed: true,
-      items: ["standards/aptos-coin", "standards/aptos-token", "standards/wallets"],
+      items: ["standards/aptos-coin", "standards/aptos-token", "standards/fungible-asset", "standards/wallets"],
     },
     {
       type: "category",
