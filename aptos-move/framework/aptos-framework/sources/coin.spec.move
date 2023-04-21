@@ -150,6 +150,7 @@ spec aptos_framework::coin {
     /// `account_addr` is not frozen.
     spec deposit<CoinType>(account_addr: address, coin: Coin<CoinType>) {
         modifies global<CoinInfo<CoinType>>(account_addr);
+        modifies global<CoinStore<CoinType>>(account_addr);
         ensures global<CoinStore<CoinType>>(account_addr).coin.value == old(global<CoinStore<CoinType>>(account_addr)).coin.value + coin.value;
     }
     spec schema DepositAbortsIf<CoinType> {

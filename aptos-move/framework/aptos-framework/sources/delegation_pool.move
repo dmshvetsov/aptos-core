@@ -598,9 +598,17 @@ module aptos_framework::delegation_pool {
         coin::transfer<AptosCoin>(delegator, pool_address, amount);
         stake::add_stake(&retrieve_stake_pool_owner(pool), amount);
 
+        spec {
+            update add_stake_pool_share_after_sync = pool.active_shares;
+        };
+
         // but buy shares for delegator just for the remaining amount after fee
         pool_u64::buy_in(&mut pool.active_shares, delegator_address, amount - add_stake_fee);
         assert_min_active_balance(pool, delegator_address);
+
+        spec {
+            update add_stake_pool_share_before_2nd_buy_in = pool.active_shares;
+        };
 
         // grant temporary ownership over `add_stake` fees to a separate shareholder in order to:
         // - not mistake them for rewards to pay the operator from
@@ -635,12 +643,23 @@ module aptos_framework::delegation_pool {
         let pool = borrow_global_mut<DelegationPool>(pool_address);
         let delegator_address = signer::address_of(delegator);
 
+        spec {
+            update pre_inactive_shares_OLC_delegator = pool_u64::spec_balance(table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle), delegator_address);
+            update pre_active_shares_OLC_delegator = pool_u64::spec_balance(pool.active_shares, delegator_address);
+        };
+
         amount = coins_to_transfer_to_ensure_min_stake(
             &pool.active_shares,
             pending_inactive_shares_pool(pool),
             delegator_address,
             amount,
         );
+
+        spec{
+            update ghost_source_pool = pool.active_shares;
+            update ghost_dest_pool = table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle);
+        };
+
         amount = redeem_active_shares(pool, delegator_address, amount);
 
         stake::unlock(&retrieve_stake_pool_owner(pool), amount);
@@ -668,6 +687,11 @@ module aptos_framework::delegation_pool {
         let pool = borrow_global_mut<DelegationPool>(pool_address);
         let delegator_address = signer::address_of(delegator);
 
+        spec {
+             update pre_inactive_shares_OLC_delegator = pool_u64::spec_balance(table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle), delegator_address);
+             update pre_active_shares_OLC_delegator = pool_u64::spec_balance(pool.active_shares, delegator_address);
+        };
+
         amount = coins_to_transfer_to_ensure_min_stake(
             pending_inactive_shares_pool(pool),
             &pool.active_shares,
@@ -675,7 +699,16 @@ module aptos_framework::delegation_pool {
             amount,
         );
         let observed_lockup_cycle = pool.observed_lockup_cycle;
+
+        spec{
+            update ghost_source_pool = table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle);
+            update ghost_dest_pool = pool.active_shares;
+        };
+
         amount = redeem_inactive_shares(pool, delegator_address, amount, observed_lockup_cycle);
+        spec {
+            update ghost_amount = amount;
+        };
 
         stake::reactivate_stake(&retrieve_stake_pool_owner(pool), amount);
 
@@ -725,6 +758,11 @@ module aptos_framework::delegation_pool {
         // stake pool will inactivate entire pending_inactive stake at `stake::withdraw` to make it withdrawable
         // however, bypassing the inactivation of excess stake (inactivated but not withdrawn) ensures
         // the OLC is not advanced indefinitely on `unlock`-`withdraw` paired calls
+
+        spec {
+            update ghost_amount = amount;
+        };
+
         if (can_withdraw_pending_inactive(pool_address)) {
             // get excess stake before being entirely inactivated
             let (_, _, _, pending_inactive) = stake::get_stake(pool_address);
@@ -756,6 +794,7 @@ module aptos_framework::delegation_pool {
                 amount_withdrawn: amount,
             },
         );
+
     }
 
     /// Return the unique observed lockup cycle where delegator `delegator_address` may have
@@ -865,6 +904,9 @@ module aptos_framework::delegation_pool {
     ): u64 {
         let inactive_shares = table::borrow_mut(&mut pool.inactive_shares, lockup_cycle);
         let shares_to_redeem = amount_to_shares_to_redeem(inactive_shares, shareholder, coins_amount);
+        spec {
+          update ghost_share_redeem = shares_to_redeem;
+        };
         // silently exit if not a shareholder otherwise redeem would fail with `ESHAREHOLDER_NOT_FOUND`
         if (shares_to_redeem == 0) return 0;
         // 1. reaching here means delegator owns inactive/pending_inactive shares at OLC `lockup_cycle`
@@ -950,7 +992,10 @@ module aptos_framework::delegation_pool {
             commission_active,
             commission_pending_inactive
         ) = calculate_stake_pool_drift(pool);
-
+        spec {
+            update sync_commission_active = commission_active;
+            update sync_commission_pending_inactive = commission_pending_inactive;
+        };
         // zero `pending_active` stake indicates that either there are no `add_stake` fees or
         // previous epoch has ended and should release the shares owning the existing fees
         let (_, _, pending_active, _) = stake::get_stake(pool_address);
@@ -972,7 +1017,11 @@ module aptos_framework::delegation_pool {
             pending_inactive_shares_pool_mut(pool),
             pending_inactive - commission_pending_inactive
         );
-
+        spec {
+            assert table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle).total_coins == pending_inactive - commission_pending_inactive;
+            update sync_delegation_pool_snap_before_buy_in = pool;
+            update sync_inactive_snap_before_buy_in = table::spec_get(sync_delegation_pool_snap_before_buy_in.inactive_shares, pool.observed_lockup_cycle);
+        };
         // reward operator its commission out of uncommitted active rewards (`add_stake` fees already excluded)
         pool_u64::buy_in(&mut pool.active_shares, stake::get_operator(pool_address), commission_active);
         // reward operator its commission out of uncommitted pending_inactive rewards
@@ -1002,6 +1051,10 @@ module aptos_framework::delegation_pool {
                 pool.observed_lockup_cycle,
                 pool_u64::create_with_scaling_factor(SHARES_SCALING_FACTOR)
             );
+        };
+        spec {
+            assert !lockup_cycle_ended ==> table::spec_get(pool.inactive_shares, pool.observed_lockup_cycle).total_coins == pending_inactive;
+            assert pool.total_coins_inactive <= spec_get_stake(pool).inactive.value;
         }
     }
 
