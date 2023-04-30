@@ -20,7 +20,6 @@ from .transactions import (
     TransactionArgument,
     TransactionPayload,
 )
-from .type_tag import StructTag, TypeTag
 
 U64_MAX = 18446744073709551615
 
@@ -409,8 +408,8 @@ class RestClient:
 
         payload = {
             "type": "entry_function_payload",
-            "function": "0x1::coin::transfer",
-            "type_arguments": ["0x1::aptos_coin::AptosCoin"],
+            "function": "0x1::aptos_account::transfer",
+            "type_arguments": [],
             "arguments": [
                 f"{recipient}",
                 str(amount),
@@ -428,9 +427,9 @@ class RestClient:
         ]
 
         payload = EntryFunction.natural(
-            "0x1::coin",
+            "0x1::aptos_account",
             "transfer",
-            [TypeTag(StructTag.from_str("0x1::aptos_coin::AptosCoin"))],
+            [],
             transaction_arguments,
         )
 
