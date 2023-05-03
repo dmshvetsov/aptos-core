@@ -30,7 +30,7 @@ class ClientConfig:
     expiration_ttl: int = 600
     gas_unit_price: int = 100
     max_gas_amount: int = 100_000
-    transaction_wait_in_seconds: int = 20
+    transaction_wait_in_seconds: int = 60
     http2: bool = False
 
 
@@ -45,12 +45,15 @@ class RestClient:
     def __init__(self, base_url: str, client_config: ClientConfig = ClientConfig()):
         self.base_url = base_url
         # Default limits
-        limits = httpx.Limits()
+        limits = httpx.Limits(max_connections=20)
         # Default timeouts but do not set a pool timeout, since the idea is that jobs will wait as
         # long as progress is being made.
         timeout = httpx.Timeout(60.0, pool=None)
         self.client = httpx.AsyncClient(
-            http2=client_config.http2, limits=limits, timeout=timeout
+            http2=client_config.http2,
+            limits=limits,
+            timeout=timeout,
+            http1=False,
         )
         self.client_config = client_config
         self._chain_id = None
