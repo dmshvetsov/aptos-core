@@ -7,13 +7,18 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 # Fungible Asset
 
-Fungible assets (FA) are an essential part of the Aptos ecosystem, as they enable the creation and transfer of fungible units, which can represent different assets, such as currency, shares, material in games, or many other types of assets. Furthermore, fungible assets can be used to build decentralized applications that require a token economy, such as decentralized exchanges or gaming platforms.
+Fungible assets (FAs) are an essential part of the Aptos ecosystem, as they enable the creation and transfer of fungible units, which can represent different assets, such as currency, shares, material in games, or many other types of assets. Furthermore, FAs can be used to build decentralized applications that require a token economy, such as decentralized exchanges or gaming platforms.
 
-The [fungible asset module](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/fungible_asset.move) provides a standard, type-safe framework for defining fungible assets within the Aptos Move ecosystem.
+The [fungible asset module](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/fungible_asset.move) provides a standard, type-safe framework for defining FAs within the Aptos Move ecosystem.
 
-In this standard, fungible assets are stored in `Object<FungibleStore>` that has a specific amount of units. Fungible assets are units that are interchangeable with others of the same metadata. The standard is built upon object model so all the resources defined here are included in object resource group and stored inside objects. The fungible assets within an object can be divided into smaller units creating new stores without creating new units. Similarly they can be combined to aggregate units into fewer objects. The standard also supports minting new units and burning existing units with appropriate controls.
+The standard is built upon object model so all the resources defined here are included in object resource group and stored inside objects. There are two types of objects related to FA.
 
-The relationship between the structures laid out in this standard is shown in this diagram.
+- `Object<Metadata>`: include information about the FA such as name, symbol and decimals.
+- `Object<FungibleStore>`: store a specific amount of FA units. FAs are units that are interchangeable with others of the same metadata. They can be stored in objects that contain a FungibleStore resource. These store objects can be freely created and FAs can be moved, split, combined between them easily.
+
+The standard also supports minting new units and burning existing units with appropriate controls.
+
+The different objects involved - `Object<Metadata>` and `Object<FungibleStore>` objects, and their relationships to accounts are shown in the diagram below:
 <div style={{textAlign: "center"}}>
 <ThemedImage
 alt="fungible asset architecture"
@@ -28,13 +33,13 @@ sources={{
 
 FA is a broader category than just coins. While fungible coins are just one possible use case of FA, it can represent a wider range of fungible items, such as in-game assets like gems or rocks, event tickets, and partial ownership of real-world assets. FA is constructed using an object model, which provides the flexibility for customizable, detailed management and offers a new programming model based on objects.
 
-Minimally, Aptos coin should be interchangeable with FA, it is up to the will of the ecosystem to dictate the whether or not Aptos coin is replaced by a FA equivalent.
+Minimally, [Aptos coin](./aptos-coin.md) should be interchangeable with FA. The migration plan is under discussion.
 
 ## Structures
 
 ### Metadata Object
 
-Within FA, metadata defines attributes of the type and other common features. The type, itself, is defined by the Object or address where this information lies. In other words, two assets with identical metadata but distinct Objects are not the same. The metadata layout is defined as:
+Metadata objects with unique addresses define the type of the FAs. Even if `Metadata` structs of two `Object<Metadata>` are exactly the same, as long as their addresses are different, the FAs points to them would be different. In short, the address of the metadata object can be used as **unique identifier** of the FA type.
 
 ```rust
 #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -65,7 +70,7 @@ struct FungibleAsset {
 
 In contrast to Objects and addresses, a Coin uses a generic, or the `CoinType`, to support distinct typing within the Coin framework. For example, `Coin<A>` and `Coin<B>` are two distinct coins, if `A != B`.
 
-The fungible assets is a struct representing the type and the amount of units held. As the struct does not have either key or store abilities, it can only be passed from one function to another but must be consumed by the end of a transaction. Specifically, it must be deposited back into a fungible store at the end of the transaction:
+The FAs is a struct representing the type and the amount of units held. As the struct does not have either key or store abilities, it can only be passed from one function to another but must be consumed by the end of a transaction. Specifically, it must be deposited back into a fungible store at the end of the transaction:
 
 ```rust
 #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -74,16 +79,20 @@ The fungible assets is a struct representing the type and the amount of units he
     metadata: Object<Metadata>,
     /// The balance of the fungible metadata.
     balance: u64,
-    /// Fungible Assets transferring is a common operation, this allows for freezing/unfreezing accounts.
+    /// FAs transferring is a common operation, this allows for freezing/unfreezing accounts.
     frozen: bool,
 }
 ```
+
+:::tip
+FAs are always stored in the top-level `FungibleStore` resource. This makes it much easier to find, analyze and control.
+:::
 
 The only extra field added here is `frozen`. if it is `true`, this object is frozen, i.e. deposit and withdraw are both disabled without using `TransferRef` in the next section.
 
 ### References
 
-Reference(ref) is the means to implement permission control across different standard in Aptos. In different contexts, it may be called capabilities sometimes. In FA standard, there are three distinct refs one each for minting, transferring, and burning FA respectively called `MintRef`, `TransferRef`, and `BurnRef`. Each ref contains a reference to the FA metadata:
+_Reference_ (ref) is the means to implement granular permission control across different standards in Aptos. In different contexts, it may be called _capabilities_. The FA standard has three distinct refs for minting, transferring, and burning FA: `MintRef`, `TransferRef`, and `BurnRef`. Each ref contains a reference to the FA metadata:
 
 ```rust
 struct MintRef has drop, store {
@@ -136,12 +145,12 @@ monitored. The following applies:
 
 ### Users
 
-Coin users can:
+FA holders can:
 
-- Merging two FAs of the same metadata object.
-- Extracting FA from a fungible store into another.
-- Ability to deposit and withdraw from a `FungibleStore` and emit events as a result.
-- Allows for users to register a `CoinStore<CoinType>` in their account to handle coin.
+- Merge two FAs of the same metadata object.
+- Extract FA from a fungible store into another.
+- Deposit and withdraw from a `FungibleStore` and emit events as a result.
+- Register a `CoinStore<CoinType>` in their account to handle coin.
 
 ### Primitives
 
@@ -150,14 +159,14 @@ to be stored in global storage to be used later.
 
 #### Mint
 
-If the manager would like to mint FA, they must retrieve a reference to `MintRef`, and call:
+If the manager would like to mint FA, they must retrieve a reference to `MintRef` and call:
 
 ```rust
 public fun mint(ref: &MintRef, amount: u64): FungibleAsset
 ```
 
 This will produce a new FA of the metadata in the ref, containing a value as dictated by the `amount`. If supply is
-tracked, then it will also be adjusted. There is also a `mint_to` function that also deposits to a `FungibleStore`
+tracked, then it will also be adjusted. Also, there is a `mint_to` function that deposits to a `FungibleStore`
 after minting as a helper.
 
 #### Burn
@@ -168,8 +177,8 @@ The opposite operation of minting. Likewise, a reference to `BurnRef` is require
 public fun burn(ref: &BurnRef, fa: FungibleAsset)
 ```
 
-This will reduce the passed-in `fa` to ashes as your will. There is also a `burn_from` function that forcibly withdraws
-from an account first and then burn the fa withdrawn as a helper.
+This will reduce the passed-in `fa` to ashes. There is also a `burn_from` function that forcibly withdraws FA
+from an account first and then burns the withdrawn FA as a helper.
 
 #### Transfer and Freeze/Unfreeze
 
@@ -207,7 +216,7 @@ public fun withdraw_with_ref<T: key>(
 This function will emit a `WithdrawEvent`.
 :::
 
-To forcibly deposit, call
+To forcibly deposit, call:
 
 ```rust
 public fun deposit_with_ref<T: key>(
@@ -286,8 +295,8 @@ This will emit both `WithdrawEvent` and `DepositEvent` on the respective `Fungib
 
 ## Events
 
-- `DepositEvent`: Emitted when fungible assets are deposited into a store.
-- `WithdrawEvent`: Emitted when fungible assets are withdrawn from a store.
+- `DepositEvent`: Emitted when FAs are deposited into a store.
+- `WithdrawEvent`: Emitted when FAs are withdrawn from a store.
 - `FrozenEvent`: Emitted when the frozen status of a fungible store is updated.
 
 ```rust
@@ -316,12 +325,13 @@ Bob, how does she determine the correct destination? Additionally, what happens 
 To address these questions, the standard has been expanded to define primary and secondary stores.
 
 - Each account owns only one undeletable primary store, the address of which is derived in a deterministic
-  manner. from the account address and metadata object address. If primary store does not exist, it will be created if
+  manner from the account address and metadata object address. If primary store does not exist, it will be created if
   FA is going to be deposited by calling functions defined in `primary_fungible_store.move`
 - Secondary stores do not have deterministic address and theoretically deletable. Users are able to create as many
-  secondary stores as they want using the provided functions but they have to take care of the indexing by themselves.
+  secondary stores as they want using the provided functions but there is a caveat that addressing secondary stores
+  on-chain may need extra work.
 
-The vast majority of users will have primary store as their only store for a specific type of fungible assets. It is
+The vast majority of users will have primary store as their only store for a specific type of FAs. It is
 expected that secondary stores would be useful in complicated defi or other asset management contracts.
 
 ## How to enable Primary `FungibleStore`?
@@ -372,7 +382,7 @@ To check the balance of a primary store, call:
 public fun balance<T: key>(account: address, metadata: Object<T>): u64
 ```
 
-To check whether the given account's primary store is frozen, call
+To check whether the given account's primary store is frozen, call:
 
 ```rust
 public fun is_frozen<T: key>(account: address, metadata: Object<T>): bool
