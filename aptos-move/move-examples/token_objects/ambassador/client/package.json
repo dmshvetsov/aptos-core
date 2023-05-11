@@ -1,0 +1,14 @@
+{
+  "name": "client",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "ambassador": "ts-node ambassador.ts"
+  },
+  "dependencies": {
+    "aptos": "latest"
+  },
+  "devDependencies": {
+    "ts-node": "10.9.1"
+  }
+}
