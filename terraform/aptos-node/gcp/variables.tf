@@ -66,6 +66,11 @@ variable "create_dns_records" {
   default     = true
 }
 
+variable "dns_ttl" {
+  description = "Time-to-Live for the Validator and Fullnode DNS records"
+  default     = 300
+}
+
 variable "helm_chart" {
   description = "Path to aptos-validator Helm chart file"
   default     = ""
