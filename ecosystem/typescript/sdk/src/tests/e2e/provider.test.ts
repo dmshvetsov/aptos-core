@@ -41,7 +41,7 @@ describe("Provider", () => {
   describe("requests", () => {
     beforeAll(async () => {
       await faucetClient.fundAccount(alice.address(), 100000000);
-    });
+    }, longTestTimeout);
 
     describe("query full node", () => {
       it("gets genesis account from fullnode", async () => {
