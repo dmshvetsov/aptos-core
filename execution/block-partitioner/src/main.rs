@@ -36,23 +36,23 @@ fn main() {
         .collect();
     println!("Created {} accounts", num_accounts);
 
+    println!("Creating {} transactions", args.block_size);
+    let transactions: Vec<AnalyzedTransaction> = (0..args.block_size)
+        .into_iter()
+        .map(|_| {
+            // randomly select a sender and receiver from accounts
+            let mut rng = OsRng;
+            let sender_index = rng.gen_range(0, num_accounts);
+            let receiver_index = rng.gen_range(0, num_accounts);
+            let receiver = accounts[receiver_index].lock().unwrap();
+            let mut sender = accounts[sender_index].lock().unwrap();
+            create_signed_p2p_transaction(&mut sender, vec![&receiver]).remove(0)
+        })
+        .collect();
+
     // profile the time taken
     let partitioner = ShardedBlockPartitioner::new(args.num_shards);
     for _ in 0..args.num_blocks {
-        println!("Creating {} transactions", args.block_size);
-        let transactions: Vec<AnalyzedTransaction> = (0..args.block_size)
-            .into_iter()
-            .map(|_| {
-                // randomly select a sender and receiver from accounts
-                let mut rng = OsRng;
-                let sender_index = rng.gen_range(0, num_accounts);
-                let receiver_index = rng.gen_range(0, num_accounts);
-                let receiver = accounts[receiver_index].lock().unwrap();
-                let mut sender = accounts[sender_index].lock().unwrap();
-                create_signed_p2p_transaction(&mut sender, vec![&receiver]).remove(0)
-            })
-            .collect();
-
         println!("Starting to partition");
         let now = Instant::now();
         let (accepted_txns, _) = partitioner.partition(transactions.clone());
