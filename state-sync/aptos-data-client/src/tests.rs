@@ -24,6 +24,7 @@ use aptos_network::{
     },
     transport::ConnectionMetadata,
 };
+use aptos_storage_interface::{DbReader, DbWriter};
 use aptos_storage_service_client::StorageServiceClient;
 use aptos_storage_service_server::network::{NetworkRequest, ResponseSender};
 use aptos_storage_service_types::{
@@ -78,6 +79,19 @@ fn mock_storage_summary(version: Version) -> StorageServerSummary {
     }
 }
 
+// A mock storage that we use for testing
+struct MockStorage {}
+
+impl MockStorage {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl DbReader for MockStorage {}
+impl DbWriter for MockStorage {}
+
+// A mock network that we use for testing
 struct MockNetwork {
     network_id: NetworkId,
     peer_mgr_reqs_rx: aptos_channel::Receiver<(PeerId, ProtocolId), PeerManagerRequest>,
@@ -123,6 +137,7 @@ impl MockNetwork {
             data_client_config,
             base_config,
             mock_time.clone(),
+            Arc::new(MockStorage::new()),
             storage_service_client,
             None,
         );

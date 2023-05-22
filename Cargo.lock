@@ -741,6 +741,7 @@ dependencies = [
  "aptos-metrics-core",
  "aptos-netcore",
  "aptos-network",
+ "aptos-storage-interface",
  "aptos-storage-service-client",
  "aptos-storage-service-server",
  "aptos-storage-service-types",
