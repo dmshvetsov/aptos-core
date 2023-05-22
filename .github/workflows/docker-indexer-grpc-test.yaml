@@ -38,7 +38,7 @@ jobs:
 
       - name: Set up and verify indexer GRPC local docker
         shell: bash
-        run: ./testsuite/indexer_grpc_local.py --verbose up
+        run: ./testsuite/indexer_grpc_local.py --verbose start
 
       - name: Print docker-compose validator-testnet logs on failure
         if: ${{ failure() }}

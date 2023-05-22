@@ -153,7 +153,25 @@ impl<T: redis::aio::ConnectionLike + Send> CacheOperator<T> {
     // Downstream system can infer the chain id from cache.
     pub async fn get_chain_id(&mut self) -> anyhow::Result<u64> {
         let chain_id: u64 = match self.conn.get::<&str, String>(CACHE_KEY_CHAIN_ID).await {
-            Ok(v) => v.parse::<u64>().expect("Redis chain_id is not a number."),
+            Ok(v) => v.parse::<u64>().expect(&format!(
+                "Redis key {} is not a number.",
+                CACHE_KEY_CHAIN_ID
+            )),
+            Err(err) => return Err(err.into()),
+        };
+        Ok(chain_id)
+    }
+
+    pub async fn get_latest_version(&mut self) -> anyhow::Result<u64> {
+        let chain_id: u64 = match self
+            .conn
+            .get::<&str, String>(CACHE_KEY_LATEST_VERSION)
+            .await
+        {
+            Ok(v) => v.parse::<u64>().expect(&format!(
+                "Redis key {} is not a number.",
+                CACHE_KEY_LATEST_VERSION
+            )),
             Err(err) => return Err(err.into()),
         };
         Ok(chain_id)
@@ -227,7 +245,7 @@ impl<T: redis::aio::ConnectionLike + Send> CacheOperator<T> {
         version: u64,
     ) -> anyhow::Result<()> {
         let script = redis::Script::new(CACHE_SCRIPT_UPDATE_LATEST_VERSION);
-        tracing::info!(
+        tracing::debug!(
             num_of_versions = num_of_versions,
             version = version,
             "Updating latest version in cache."

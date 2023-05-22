@@ -11,8 +11,8 @@ pub mod local;
 pub use local::*;
 
 pub const FILE_FOLDER_NAME: &str = "files";
-
 const METADATA_FILE_NAME: &str = "metadata.json";
+const FILE_STORE_UPDATE_FREQUENCY_SECS: u64 = 5;
 
 #[inline]
 pub fn generate_blob_name(starting_version: u64) -> String {

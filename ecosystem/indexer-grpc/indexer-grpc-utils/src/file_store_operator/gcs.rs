@@ -205,7 +205,12 @@ impl FileStoreOperator for GcsFileStoreOperator {
             anyhow::bail!("Uploading transactions failed.");
         }
 
-        self.update_file_store_metadata(chain_id, start_version + batch_size as u64)
-            .await
+        if (std::time::Instant::now() - self.latest_metadata_update_timestamp).as_secs()
+            > FILE_STORE_UPDATE_FREQUENCY_SECS
+        {
+            self.update_file_store_metadata(chain_id, start_version + batch_size as u64)
+                .await?;
+        }
+        Ok(())
     }
 }

@@ -90,6 +90,7 @@ members = [
     "crates/transaction-generator-lib",
     "ecosystem/indexer-grpc/indexer-grpc-cache-worker",
     "ecosystem/indexer-grpc/indexer-grpc-data-service",
+    "ecosystem/indexer-grpc/indexer-grpc-e2e-tests",
     "ecosystem/indexer-grpc/indexer-grpc-file-store",
     "ecosystem/indexer-grpc/indexer-grpc-fullnode",
     "ecosystem/indexer-grpc/indexer-grpc-parser",

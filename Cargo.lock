@@ -1520,6 +1520,7 @@ name = "aptos-indexer-grpc-cache-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aptos-config",
  "aptos-indexer-grpc-server-framework",
  "aptos-indexer-grpc-utils",
  "aptos-metrics-core",
@@ -1535,9 +1536,11 @@ dependencies = [
  "once_cell",
  "prost",
  "redis",
+ "reqwest",
  "serde 1.0.149",
  "serde_json",
  "serde_yaml 0.8.26",
+ "tempfile",
  "tokio",
  "tonic",
  "tracing",
@@ -1570,6 +1573,43 @@ dependencies = [
  "tonic-reflection",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "aptos-indexer-grpc-e2e-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aptos-config",
+ "aptos-indexer-grpc-cache-worker",
+ "aptos-indexer-grpc-data-service",
+ "aptos-indexer-grpc-file-store",
+ "aptos-indexer-grpc-server-framework",
+ "aptos-indexer-grpc-utils",
+ "aptos-inspection-service",
+ "aptos-logger",
+ "aptos-protos",
+ "aptos-runtimes",
+ "async-trait",
+ "backoff",
+ "base64 0.13.0",
+ "clap 3.2.23",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "itertools",
+ "prometheus",
+ "prost",
+ "redis",
+ "reqwest",
+ "serde 1.0.149",
+ "serde_json",
+ "serde_yaml 0.8.26",
+ "tempfile",
+ "tokio",
+ "tonic",
+ "tracing",
+ "warp",
 ]
 
 [[package]]

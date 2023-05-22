@@ -4,6 +4,7 @@
 use crate::{constants::BLOB_STORAGE_SIZE, file_store_operator::*, EncodedTransactionWithVersion};
 use itertools::{any, Itertools};
 use std::path::PathBuf;
+use tracing::info;
 
 pub struct LocalFileStoreOperator {
     path: PathBuf,
@@ -96,6 +97,7 @@ impl FileStoreOperator for LocalFileStoreOperator {
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {
                     // If the metadata is not found, it means the file store is empty.
+                    info!("File store is empty. Creating metadata file.");
                     self.update_file_store_metadata(expected_chain_id, 0)
                         .await
                         .expect("[Indexer File] Update metadata failed.");
@@ -116,13 +118,14 @@ impl FileStoreOperator for LocalFileStoreOperator {
         chain_id: u64,
         version: u64,
     ) -> anyhow::Result<()> {
-        if (std::time::Instant::now() - self.latest_metadata_update_timestamp).as_secs() < 5 {
-            return Ok(());
-        }
-
         let metadata = FileStoreMetadata::new(chain_id, version);
         // If the metadata is not updated, the indexer will be restarted.
         let metadata_path = self.path.join(METADATA_FILE_NAME);
+        info!(
+            "Updating metadata file {} @ version {}",
+            metadata_path.display(),
+            version
+        );
         match tokio::fs::write(metadata_path, serde_json::to_vec(&metadata).unwrap()).await {
             Ok(_) => {
                 self.latest_metadata_update_timestamp = std::time::Instant::now();
@@ -164,7 +167,7 @@ impl FileStoreOperator for LocalFileStoreOperator {
                 .path
                 .join(generate_blob_name(transactions_file.starting_version).as_str());
 
-            tracing::info!(
+            tracing::debug!(
                 "Uploading transactions to {:?}",
                 txns_path.to_str().unwrap()
             );
@@ -192,7 +195,12 @@ impl FileStoreOperator for LocalFileStoreOperator {
             anyhow::bail!("Uploading transactions failed.");
         }
 
-        self.update_file_store_metadata(chain_id, start_version + batch_size as u64)
-            .await
+        if (std::time::Instant::now() - self.latest_metadata_update_timestamp).as_secs()
+            > FILE_STORE_UPDATE_FREQUENCY_SECS
+        {
+            self.update_file_store_metadata(chain_id, start_version + batch_size as u64)
+                .await?;
+        }
+        Ok(())
     }
 }

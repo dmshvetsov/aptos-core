@@ -8,6 +8,7 @@ import os
 import argparse
 import logging
 from dataclasses import dataclass
+from typing import List
 from applogging import init_logging, logger
 from forge_wrapper_core.shell import Shell, LocalShell
 from forge_wrapper_core.reqwest import SimpleHttpClient, HttpClient
@@ -23,7 +24,7 @@ GRPC_DATA_SERVICE_URL = "localhost:50052"
 
 SHARED_DOCKER_VOLUME_NAMES = ["aptos-shared", "indexer-grpc-file-store"]
 
-WAIT_TESTNET_START_TIMEOUT_SECS = 60
+WAIT_TESTNET_START_TIMEOUT_SECS = 60 * 5
 GRPC_PROGRESS_THRESHOLD_SECS = 10
 
 
@@ -44,6 +45,13 @@ class Subcommand(Enum):
     WIPE = "wipe"
 
 
+class StartSubcommand(Enum):
+    NO_INDEXER_GRPC = "no-indexer-grpc"
+
+def normalize_var_name(var_name: str) -> str:
+    return var_name.replace("-", "_").upper()
+
+
 # set envs based on platform, if it's not already overriden
 if not os.environ.get("REDIS_IMAGE_REPO"):
     if platform.system() == "Darwin":
@@ -57,7 +65,10 @@ class DockerComposeError(Exception):
 
 
 def run_docker_compose(
-    shell: Shell, compose_file_path: str, compose_action: DockerComposeAction
+    shell: Shell,
+    compose_file_path: str,
+    compose_action: DockerComposeAction,
+    extra_args: List[str] = [],
 ):
     log.info(f"Running docker-compose {compose_action.value} on {compose_file_path}")
     try:
@@ -68,7 +79,8 @@ def run_docker_compose(
                 compose_file_path,
                 compose_action.value,
             ]
-            + (["--detach"] if compose_action == DockerComposeAction.UP else []),
+            + (["--detach"] if compose_action == DockerComposeAction.UP else [])
+            + extra_args,
             stream_output=True,
         )
     except Exception as e:
@@ -84,8 +96,24 @@ def start_single_validator_testnet(shell: Shell):
     )
 
 
-def start_indexer_grpc(shell: Shell):
-    run_docker_compose(shell, INDEXER_GRPC_DOCKER_COMPOSE_FILE, DockerComposeAction.UP)
+def start_indexer_grpc(shell: Shell, redis_only: bool = False):
+    extra_indexer_grpc_docker_args = []
+    if redis_only:
+        extra_indexer_grpc_docker_args = [
+            "--scale",
+            "indexer-grpc-cache-worker=0",
+            "--scale",
+            "indexer-grpc-file-store=0",
+            "--scale",
+            "indexer-grpc-data-service=0",
+        ]
+
+    run_docker_compose(
+        shell,
+        INDEXER_GRPC_DOCKER_COMPOSE_FILE,
+        DockerComposeAction.UP,
+        extra_args=extra_indexer_grpc_docker_args,
+    )
 
 
 def stop_single_validator_testnet(shell: Shell):
@@ -154,17 +182,17 @@ def wait_for_indexer_grpc_progress(shell: Shell, client: HttpClient):
     log.info("Stream finished successfully")
 
 
-def start(context: SystemContext):
+def start(context: SystemContext, no_indexer_grpc: bool = False):
     start_single_validator_testnet(context.shell)
 
     # wait for progress
     latest_version = wait_for_testnet_progress(context.http_client)
     log.info(f"TESTNET STARTED: latest version @ {latest_version}")
 
-    start_indexer_grpc(context.shell)
+    start_indexer_grpc(context.shell, redis_only=no_indexer_grpc)
 
-    # run grpcurl
-    wait_for_indexer_grpc_progress(context.shell, context.http_client)
+    if not no_indexer_grpc:
+        wait_for_indexer_grpc_progress(context.shell, context.http_client)
 
 
 def stop(context: SystemContext):
@@ -185,15 +213,23 @@ def main():
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     subparser = parser.add_subparsers(dest="subcommand", required=True)
-    subparser.add_parser(Subcommand.START.value, help="Start the indexer GRPC setup")
+    start_parser = subparser.add_parser(
+        Subcommand.START.value, help="Start the indexer GRPC setup"
+    )
+    start_parser.add_argument(
+        f"--{StartSubcommand.NO_INDEXER_GRPC.value}",
+        dest="no_indexer_grpc",
+        action="store_true",
+    )
     subparser.add_parser(Subcommand.STOP.value, help="Stop the indexer GRPC setup")
     subparser.add_parser(Subcommand.WIPE.value, help="Completely wipe the storage")
     args = parser.parse_args()
-
     # init logging
     init_logging(logger=log, print_metadata=True)
     if args.verbose:
         log.setLevel(logging.DEBUG)
+
+    log.debug(f"args: {args}")
 
     context = SystemContext(
         shell=LocalShell(),
@@ -204,7 +240,10 @@ def main():
 
     match subcommand:
         case Subcommand.START:
-            start(context)
+            start(
+                context,
+                args.no_indexer_grpc,
+            )
         case Subcommand.STOP:
             stop(context)
             log.info("To wipe all data, run: $ ./testsuite/indexer_grpc_local.py wipe")
