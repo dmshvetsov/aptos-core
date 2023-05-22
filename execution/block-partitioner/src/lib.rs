@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod dependency_aware_partitioner;
+pub mod sharded_block_partitioner;
 pub mod test_utils;
 pub mod transaction_dependency_graph;
-pub mod sharded_block_partitioner;
 
 use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
 use std::collections::HashMap;

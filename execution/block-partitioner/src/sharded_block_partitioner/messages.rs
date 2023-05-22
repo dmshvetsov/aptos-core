@@ -1,17 +1,15 @@
 // Copyright © Aptos Foundation
 
-use std::collections::HashSet;
-use std::hash::Hash;
-use std::sync::Arc;
 use aptos_types::transaction::analyzed_transaction::{AnalyzedTransaction, StorageLocation};
-use aptos_types::transaction::Transaction;
 use move_core_types::account_address::AccountAddress;
+use std::{collections::HashSet, sync::Arc};
 
 pub enum ControlMsg {
     PartitionBlock(PartitionBlockMsg),
     Stop,
 }
 
+#[derive(Clone, Debug)]
 pub enum CrossShardMsg {
     DependencyAnalysis(DependencyAnalysisMsg),
     DiscardedSenders(DiscardedSendersMsg),
@@ -23,10 +21,7 @@ pub struct PartitionBlockMsg {
 }
 
 impl PartitionBlockMsg {
-    pub fn new(
-        transactions: Vec<AnalyzedTransaction>,
-        index_offset: usize,
-    ) -> Self {
+    pub fn new(transactions: Vec<AnalyzedTransaction>, index_offset: usize) -> Self {
         Self {
             transactions,
             index_offset,
@@ -36,13 +31,13 @@ impl PartitionBlockMsg {
 
 pub struct PartitionedBlockResponse {
     pub accepted_txns: Vec<(usize, AnalyzedTransaction)>,
-    pub rejected_txns: Vec<(usize, AnalyzedTransaction)>
+    pub rejected_txns: Vec<(usize, AnalyzedTransaction)>,
 }
 
 impl PartitionedBlockResponse {
     pub fn new(
         accepted_txns: Vec<(usize, AnalyzedTransaction)>,
-        rejected_txns: Vec<(usize, AnalyzedTransaction)>
+        rejected_txns: Vec<(usize, AnalyzedTransaction)>,
     ) -> Self {
         Self {
             accepted_txns,
@@ -51,38 +46,35 @@ impl PartitionedBlockResponse {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct DependencyAnalysisMsg {
     pub source_shard_id: usize,
-    pub read_set: Arc<HashSet<StorageLocation>>,
+    pub exclusive_read_set: Arc<HashSet<StorageLocation>>,
     pub write_set: Arc<HashSet<StorageLocation>>,
 }
 
 impl DependencyAnalysisMsg {
     pub fn new(
         source_shard_id: usize,
-        read_set: Arc<HashSet<StorageLocation>>,
+        exclusive_read_set: Arc<HashSet<StorageLocation>>,
         write_set: Arc<HashSet<StorageLocation>>,
     ) -> Self {
         Self {
             source_shard_id,
-            read_set,
+            exclusive_read_set,
             write_set,
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct DiscardedSendersMsg {
     pub source_shard_id: usize,
     pub discarded_senders: Arc<HashSet<AccountAddress>>,
 }
 
 impl DiscardedSendersMsg {
-    pub fn new(
-        source_shard_id: usize,
-        discarded_senders: Arc<HashSet<AccountAddress>>,
-    ) -> Self {
+    pub fn new(source_shard_id: usize, discarded_senders: Arc<HashSet<AccountAddress>>) -> Self {
         Self {
             source_shard_id,
             discarded_senders,

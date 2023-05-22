@@ -483,6 +483,7 @@ dependencies = [
  "aptos-metrics-core",
  "aptos-types",
  "bcs 0.1.4",
+ "clap 3.2.23",
  "dashmap",
  "itertools",
  "move-core-types",

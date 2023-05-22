@@ -1,19 +1,16 @@
 // Copyright © Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
-
-use dashmap::DashMap;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-
-use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
-use move_core_types::account_address::AccountAddress;
-
 use crate::{
-    BlockPartitioner,
     get_shard_for_index,
     transaction_dependency_graph::{DependencyGraph, Node},
+    BlockPartitioner,
 };
+use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
+use dashmap::DashMap;
+use move_core_types::account_address::AccountAddress;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 enum PartitioningStatus {
@@ -176,21 +173,18 @@ impl BlockPartitioner for DependencyAwareUniformPartitioner {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Mutex};
-
-    use rand::{Rng, rngs::OsRng};
-
-    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
-
     use crate::{
-        BlockPartitioner,
         dependency_aware_partitioner::{DependencyAwareUniformPartitioner, PartitioningStatus},
         get_shard_for_index,
         test_utils::{
             create_non_conflicting_p2p_transaction, create_signed_p2p_transaction,
             generate_test_account, TestAccount,
-            },
-        };
+        },
+        BlockPartitioner,
+    };
+    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
+    use rand::{rngs::OsRng, Rng};
+    use std::{collections::HashMap, sync::Mutex};
 
     fn verify_txn_statuses(
         txn_statuses: &HashMap<usize, PartitioningStatus>,

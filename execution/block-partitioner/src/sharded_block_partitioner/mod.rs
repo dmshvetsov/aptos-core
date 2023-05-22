@@ -1,26 +1,23 @@
 // Copyright © Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 
-use aptos_logger::{error, info, trace};
-use aptos_types::transaction::{
-    analyzed_transaction::AnalyzedTransaction, Transaction, TransactionOutput,
+use crate::sharded_block_partitioner::{
+    messages::{ControlMsg, CrossShardMsg, PartitionBlockMsg, PartitionedBlockResponse},
+    partitioning_shard::PartitioningShard,
 };
+use aptos_logger::{error, info};
+use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
 use std::{
-    sync::{
-        Arc,
-        mpsc::{Receiver, Sender},
-    },
+    collections::HashMap,
+    sync::mpsc::{Receiver, Sender},
     thread,
+    time::Instant,
 };
-use std::collections::HashMap;
-use crate::BlockPartitioner;
-use crate::sharded_block_partitioner::messages::{ControlMsg, CrossShardMsg, PartitionBlockMsg, PartitionedBlockResponse};
-use crate::sharded_block_partitioner::partitioning_shard::PartitioningShard;
 
-mod partitioning_shard;
-mod messages;
-pub mod dependency_analyzer;
 mod conflict_detector;
+pub mod dependency_analyzer;
+mod messages;
+mod partitioning_shard;
 
 pub struct ShardedBlockPartitioner {
     num_shards: usize,
@@ -30,22 +27,26 @@ pub struct ShardedBlockPartitioner {
 }
 
 impl ShardedBlockPartitioner {
-    pub fn new(
-        num_shards: usize,
-    ) -> Self {
+    pub fn new(num_shards: usize) -> Self {
         assert!(num_shards > 0, "num_executor_shards must be > 0");
-        // create channels for cross shard messages across all shards
+        // create channels for cross shard messages across all shards. This is a full mesh connection.
+        // Each shard has a vector of channels for sending messages to other shards and
+        // a vector of channels for receiving messages from other shards.
         let mut messages_txs = vec![];
         let mut messages_rxs = vec![];
         for _ in 0..num_shards {
-            let (messages_tx, messages_rx) = std::sync::mpsc::channel();
-            messages_txs.push(messages_tx);
-            messages_rxs.push(messages_rx);
+            messages_txs.push(vec![]);
+            messages_rxs.push(vec![]);
+            for _ in 0..num_shards {
+                let (messages_tx, messages_rx) = std::sync::mpsc::channel();
+                messages_txs.last_mut().unwrap().push(messages_tx);
+                messages_rxs.last_mut().unwrap().push(messages_rx);
+            }
         }
         let mut control_txs = vec![];
         let mut result_rxs = vec![];
         let mut shard_join_handles = vec![];
-        for (i, message_rx) in messages_rxs.into_iter().enumerate() {
+        for (i, message_rxs) in messages_rxs.into_iter().enumerate() {
             let (control_tx, control_rx) = std::sync::mpsc::channel();
             let (result_tx, result_rx) = std::sync::mpsc::channel();
             control_txs.push(control_tx);
@@ -54,20 +55,26 @@ impl ShardedBlockPartitioner {
                 i,
                 control_rx,
                 result_tx,
-                message_rx,
-                messages_txs.iter().map(|(tx)| tx.clone()).collect(),
+                message_rxs,
+                messages_txs.iter().map(|txs| txs[i].clone()).collect(),
             ));
         }
         Self {
-            num_shards: num_shards,
+            num_shards,
             control_txs,
             result_rxs,
             shard_threads: shard_join_handles,
         }
     }
 
-    pub
-    fn partition(&self, transactions: Vec<AnalyzedTransaction>) -> (HashMap<usize, Vec<(usize, AnalyzedTransaction)>>, HashMap<usize, Vec<(usize, AnalyzedTransaction)>>) {
+    pub fn partition(
+        &self,
+        transactions: Vec<AnalyzedTransaction>,
+    ) -> (
+        HashMap<usize, Vec<(usize, AnalyzedTransaction)>>,
+        HashMap<usize, Vec<(usize, AnalyzedTransaction)>>,
+    ) {
+        let now = Instant::now();
         let total_txns = transactions.len();
         let txns_per_shard = (total_txns as f64 / self.num_shards as f64).ceil() as usize;
 
@@ -83,17 +90,20 @@ impl ShardedBlockPartitioner {
             let block_size = analyzed_txns.len();
             let partitioning_msg = PartitionBlockMsg::new(analyzed_txns, index_offset);
             index_offset += block_size;
-            if let Err(e) = self.control_txs[shard_id].send(ControlMsg::PartitionBlock(partitioning_msg)) {
-                error!("Failed to send partitioning message to executor shard: {:?}", e);
+            if let Err(e) =
+                self.control_txs[shard_id].send(ControlMsg::PartitionBlock(partitioning_msg))
+            {
+                error!(
+                    "Failed to send partitioning message to executor shard: {:?}",
+                    e
+                );
             }
         }
 
         // pre-poluate the hashmap with empty vectors for both accepted and rejected transactions
         // for each shard.
-        let mut accpeted_txns: HashMap<usize, Vec<(usize, AnalyzedTransaction)>> =
-            HashMap::new();
-        let mut rejected_txns: HashMap<usize, Vec<(usize, AnalyzedTransaction)>> =
-            HashMap::new();
+        let mut accpeted_txns: HashMap<usize, Vec<(usize, AnalyzedTransaction)>> = HashMap::new();
+        let mut rejected_txns: HashMap<usize, Vec<(usize, AnalyzedTransaction)>> = HashMap::new();
         for i in 0..self.num_shards {
             accpeted_txns.insert(i, Vec::new());
             rejected_txns.insert(i, Vec::new());
@@ -103,12 +113,20 @@ impl ShardedBlockPartitioner {
         for shard_id in 0..current_shards {
             let result = self.result_rxs[shard_id].recv().unwrap();
             for (index, accepted_txn) in result.accepted_txns.into_iter() {
-                accpeted_txns.get_mut(&shard_id).unwrap().push((index, accepted_txn));
+                accpeted_txns
+                    .get_mut(&shard_id)
+                    .unwrap()
+                    .push((index, accepted_txn));
             }
             for (index, rejected_txn) in result.rejected_txns.into_iter() {
-                rejected_txns.get_mut(&shard_id).unwrap().push((index, rejected_txn));
+                rejected_txns
+                    .get_mut(&shard_id)
+                    .unwrap()
+                    .push((index, rejected_txn));
             }
         }
+
+        info!("Receiving Partitioning Messages took: {:?}", now.elapsed());
 
         (accpeted_txns, rejected_txns)
     }
@@ -137,20 +155,15 @@ fn spawn_partitioning_shard(
     shard_id: usize,
     control_rx: Receiver<ControlMsg>,
     result_tx: Sender<PartitionedBlockResponse>,
-    message_rx: Receiver<CrossShardMsg>,
-    messages_tx: Vec<Sender<CrossShardMsg>>,
+    message_rxs: Vec<Receiver<CrossShardMsg>>,
+    messages_txs: Vec<Sender<CrossShardMsg>>,
 ) -> thread::JoinHandle<()> {
     // create and start a new executor shard in a separate thread
     thread::Builder::new()
         .name(format!("partitioning-shard-{}", shard_id))
         .spawn(move || {
-            let partitioning_shard = PartitioningShard::new(
-                shard_id,
-                control_rx,
-                result_tx,
-                message_rx,
-                messages_tx,
-            );
+            let partitioning_shard =
+                PartitioningShard::new(shard_id, control_rx, result_tx, message_rxs, messages_txs);
             partitioning_shard.start();
         })
         .unwrap()
@@ -158,22 +171,13 @@ fn spawn_partitioning_shard(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Mutex};
-
-    use rand::{Rng, rngs::OsRng};
-
-    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
-
     use crate::{
-        BlockPartitioner,
         get_shard_for_index,
-        test_utils::{
-            create_non_conflicting_p2p_transaction, create_signed_p2p_transaction,
-            generate_test_account, TestAccount,
-        },
+        sharded_block_partitioner::{messages::PartitioningStatus, ShardedBlockPartitioner},
+        test_utils::{create_signed_p2p_transaction, generate_test_account, TestAccount},
     };
-    use crate::sharded_block_partitioner::messages::PartitioningStatus;
-    use crate::sharded_block_partitioner::ShardedBlockPartitioner;
+    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
+    use std::collections::HashMap;
 
     fn verify_txn_statuses(
         txn_statuses: &HashMap<usize, PartitioningStatus>,
@@ -261,10 +265,8 @@ mod tests {
         let num_txns = 10;
         let mut transactions = Vec::new();
         for _ in 0..num_txns {
-            transactions.push(create_signed_p2p_transaction(
-                &mut sender,
-                vec![&receiver],
-            ).remove(0));
+            transactions
+                .push(create_signed_p2p_transaction(&mut sender, vec![&receiver]).remove(0));
         }
         let partitioner = ShardedBlockPartitioner::new(4);
         let (accepted_txns, rejected_txns) = partitioner.partition(transactions.clone());
