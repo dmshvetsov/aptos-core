@@ -28,6 +28,7 @@ pub struct ShardedBlockPartitioner {
 
 impl ShardedBlockPartitioner {
     pub fn new(num_shards: usize) -> Self {
+        println!("Creating a new sharded block partitioner with {} shards", num_shards);
         assert!(num_shards > 0, "num_executor_shards must be > 0");
         // create channels for cross shard messages across all shards. This is a full mesh connection.
         // Each shard has a vector of channels for sending messages to other shards and
@@ -126,8 +127,7 @@ impl ShardedBlockPartitioner {
             }
         }
 
-        info!("Receiving Partitioning Messages took: {:?}", now.elapsed());
-
+        println!("Receiving Partitioning Messages took: {:?}", now.elapsed());
         (accpeted_txns, rejected_txns)
     }
 }
