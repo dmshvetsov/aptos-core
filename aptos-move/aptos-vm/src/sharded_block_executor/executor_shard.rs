@@ -64,17 +64,21 @@ impl<S: StateView + Sync + Send + 'static> ExecutorShard<S> {
             concurrency_level_per_shard,
             self.maybe_gas_limit,
         );
-        let
-
-            outputs = match ret {
+        let outputs = match ret {
             Ok(outputs) => outputs,
             Err(err) => {
                 error!("Error executing block: {:?}", err);
                 return Err(err);
             },
         };
-        println!("accepted_transaction_indices length is : {:?}", accepted_transaction_indices.len());
-        println!("rejected_transaction_indices length is : {:?}", rejected_transaction_indices.len());
+        println!(
+            "accepted_transaction_indices length is : {:?}",
+            accepted_transaction_indices.len()
+        );
+        println!(
+            "rejected_transaction_indices length is : {:?}",
+            rejected_transaction_indices.len()
+        );
 
         let mut ordered_outputs = vec![
             TransactionOutput::retried();
@@ -89,20 +93,21 @@ impl<S: StateView + Sync + Send + 'static> ExecutorShard<S> {
 
         while index < ordered_outputs.len() {
             if accepted_index < accepted_transaction_indices.len()
-                && rejected_index < rejected_transaction_indices.len() {
-                if accepted_transaction_indices[accepted_index] < rejected_transaction_indices[rejected_index] {
+                && rejected_index < rejected_transaction_indices.len()
+            {
+                if accepted_transaction_indices[accepted_index]
+                    < rejected_transaction_indices[rejected_index]
+                {
                     ordered_outputs[index] = outout_iter.next().unwrap();
                     accepted_index += 1;
                 } else {
                     ordered_outputs[index] = TransactionOutput::retried();
                     rejected_index += 1;
                 }
-            }
-            else if accepted_index >= accepted_transaction_indices.len() {
+            } else if accepted_index >= accepted_transaction_indices.len() {
                 ordered_outputs[index] = TransactionOutput::retried();
                 rejected_index += 1;
-            }
-            else if rejected_index >= rejected_transaction_indices.len() {
+            } else if rejected_index >= rejected_transaction_indices.len() {
                 ordered_outputs[index] = outout_iter.next().unwrap();
                 accepted_index += 1;
             }

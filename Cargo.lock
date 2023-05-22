@@ -474,6 +474,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aptos-block-partitioner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aptos-crypto",
+ "aptos-logger",
+ "aptos-metrics-core",
+ "aptos-types",
+ "bcs 0.1.4",
+ "dashmap",
+ "itertools",
+ "move-core-types",
+ "rand 0.7.3",
+ "rayon",
+]
+
+[[package]]
 name = "aptos-bounded-executor"
 version = "0.1.0"
 dependencies = [
@@ -3257,6 +3274,7 @@ dependencies = [
  "anyhow",
  "aptos-aggregator",
  "aptos-block-executor",
+ "aptos-block-partitioner",
  "aptos-crypto",
  "aptos-crypto-derive",
  "aptos-framework",

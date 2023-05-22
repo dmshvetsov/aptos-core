@@ -1,10 +1,8 @@
 // Copyright © Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::sharded_block_executor::{
-    block_partitioner::{BlockPartitioner, UniformPartitioner},
-    executor_shard::ExecutorShard,
-};
+use crate::sharded_block_executor::executor_shard::ExecutorShard;
+use aptos_block_partitioner::{BlockPartitioner, UniformPartitioner};
 use aptos_logger::{error, info, trace};
 use aptos_state_view::StateView;
 use aptos_types::transaction::{
@@ -19,15 +17,8 @@ use std::{
     },
     thread,
 };
-use anyhow::ensure;
-use crate::sharded_block_executor::block_partitioner::dependency_aware_partitioner::DependencyAwareUniformPartitioner;
 
-mod block_partitioner;
 mod executor_shard;
-#[cfg(test)]
-mod test_utils;
-mod transaction_dependency_graph;
-
 /// A wrapper around sharded block executors that manages multiple shards and aggregates the results.
 pub struct ShardedBlockExecutor<S: StateView + Sync + Send + 'static> {
     num_executor_shards: usize,
@@ -101,7 +92,7 @@ impl<S: StateView + Sync + Send + 'static> ShardedBlockExecutor<S> {
         );
         Self {
             num_executor_shards,
-            partitioner: Arc::new(DependencyAwareUniformPartitioner {}),
+            partitioner: Arc::new(UniformPartitioner {}),
             command_txs,
             shard_threads: shard_join_handles,
             result_rxs,
@@ -151,7 +142,12 @@ impl<S: StateView + Sync + Send + 'static> ShardedBlockExecutor<S> {
             let result = self.result_rxs[i].recv().unwrap();
             aggregated_results.extend(result?);
         }
-        assert!(aggregated_results.len() ==  block_size, "ShardedBlockExecutor: expected {} outputs but got {}", block_size, aggregated_results.len());
+        assert!(
+            aggregated_results.len() == block_size,
+            "ShardedBlockExecutor: expected {} outputs but got {}",
+            block_size,
+            aggregated_results.len()
+        );
         Ok(aggregated_results)
     }
 }

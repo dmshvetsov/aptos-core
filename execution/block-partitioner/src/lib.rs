@@ -1,13 +1,21 @@
 // Copyright © Aptos Foundation
+// Parts of the project are originally copyright © Meta Platforms, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod dependency_aware_partitioner;
+pub mod test_utils;
+pub mod transaction_dependency_graph;
+pub mod sharded_block_partitioner;
 
 use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
 use std::collections::HashMap;
 
 pub trait BlockPartitioner: Send + Sync {
-    /// Partitions the transactions into `num_shards` shards. Returns two maps, one for map of
+    /// Partitions the transactions into `num
+    ///
+    /// _shards` shards. Returns two maps, one for map of
+    ///
+    ///
     /// shard id to vector of accepted transaction in order of execution with original index
     /// and other is the map of shard id to vector of rejected transactions with original index.
     fn partition(

@@ -1,9 +1,8 @@
 // Copyright © Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 use aptos_types::transaction::analyzed_transaction::{AnalyzedTransaction, StorageLocation};
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Node<'a> {
@@ -22,27 +21,33 @@ impl<'a> Node<'a> {
 }
 
 pub struct DependencyGraph<'a> {
-    adjacency_list: DashMap<Node<'a>, DashSet<Node<'a>>>,
+    adjacency_list: DashMap<Node<'a>, DashMap<Node<'a>, ()>>,
     // The reverse adjacency list is used to quickly find the dependencies of a transaction.
-    reverse_adjacency_list: DashMap<Node<'a>, DashSet<Node<'a>>>,
+    reverse_adjacency_list: DashMap<Node<'a>, DashMap<Node<'a>, ()>>,
+}
+
+impl<'a> Default for DependencyGraph<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> DependencyGraph<'a> {
     pub fn new() -> Self {
         DependencyGraph {
-            adjacency_list: DashMap::new(),
-            reverse_adjacency_list: DashMap::new(),
+            adjacency_list: DashMap::with_shard_amount(128),
+            reverse_adjacency_list: DashMap::with_shard_amount(128),
         }
     }
 
     #[cfg(test)]
-    pub fn get_adjacency_list(&self) -> &DashMap<Node<'a>, DashSet<Node<'a>>> {
+    pub fn get_adjacency_list(&self) -> &DashMap<Node<'a>, DashMap<Node<'a>, ()>> {
         &self.adjacency_list
     }
 
     #[cfg(test)]
 
-    pub fn get_reverse_adjacency_list(&self) -> &DashMap<Node<'a>, DashSet<Node<'a>>> {
+    pub fn get_reverse_adjacency_list(&self) -> &DashMap<Node<'a>, DashMap<Node<'a>, ()>> {
         &self.reverse_adjacency_list
     }
 
@@ -56,19 +61,19 @@ impl<'a> DependencyGraph<'a> {
         let dependencies = self
             .adjacency_list
             .entry(source)
-            .or_insert_with(DashSet::new);
+            .or_insert_with(|| DashMap::with_shard_amount(128));
 
         let reverse_dependencies = self
             .reverse_adjacency_list
             .entry(destination)
-            .or_insert_with(DashSet::new);
+            .or_insert_with(|| DashMap::with_shard_amount(128));
 
         // Add the source transaction to the dependency set
-        dependencies.insert(destination);
-        reverse_dependencies.insert(source);
+        dependencies.insert(destination, ());
+        reverse_dependencies.insert(source, ());
     }
 
-    pub fn get_dependent_nodes(&self, node: Node<'a>) -> Option<DashSet<Node<'a>>> {
+    pub fn get_dependent_nodes(&self, node: Node<'a>) -> Option<DashMap<Node<'a>, ()>> {
         self.reverse_adjacency_list
             .get(&node)
             .map(|entry| entry.value().clone())
@@ -80,20 +85,19 @@ impl<'a> DependencyGraph<'a> {
         // If node2 exists in both adjacency lists and reverse adjacency lists of node1, then there is a cycle
         self.adjacency_list
             .get(&node1)
-            .map(|entry| entry.value().contains(&node2))
+            .map(|entry| entry.value().contains_key(&node2))
             .unwrap_or(false)
             && self
                 .reverse_adjacency_list
                 .get(&node1)
-                .map(|entry| entry.value().contains(&node2))
+                .map(|entry| entry.value().contains_key(&node2))
                 .unwrap_or(false)
     }
 
     pub fn create(analyzed_transactions: &[AnalyzedTransaction]) -> DependencyGraph {
         let dependency_graph = DependencyGraph::new();
 
-        let read_hint_index = Self::build_hint_index(analyzed_transactions);
-        let (_read_hint_index1, txn_index) = Self::build_indices(analyzed_transactions);
+        let (read_hint_index, txn_index) = Self::build_indices(analyzed_transactions);
 
         // Iterate through the analyzed transactions
         analyzed_transactions
@@ -104,24 +108,24 @@ impl<'a> DependencyGraph<'a> {
                 dependency_graph
                     .adjacency_list
                     .entry(Node::new(analyzed_txn, index))
-                    .or_insert_with(DashSet::new);
+                    .or_insert_with(|| DashMap::with_shard_amount(128));
                 // Initialize the reverse adjecency list for the current transaction
                 dependency_graph
                     .reverse_adjacency_list
                     .entry(Node::new(analyzed_txn, index))
-                    .or_insert_with(DashSet::new);
+                    .or_insert_with(|| DashMap::with_shard_amount(128));
 
                 // Iterate through the write hints of the current transaction
                 for write_hint in analyzed_txn.write_hints() {
                     if let Some(transactions) = read_hint_index.get(write_hint) {
                         // Iterate through the transactions that read from the current write hint
-                        for &dependent_txn in transactions {
-                            if dependent_txn != analyzed_txn {
+                        for dependent_txn in transactions.value().iter() {
+                            if *dependent_txn.key() != analyzed_txn {
                                 // Add the dependent transaction to the dependencies
                                 dependency_graph.add_dependency(
                                     Node::new(
-                                        dependent_txn,
-                                        *txn_index.get(dependent_txn).unwrap(),
+                                        dependent_txn.key(),
+                                        *txn_index.get(*dependent_txn.key()).unwrap(),
                                     ),
                                     Node::new(analyzed_txn, index),
                                 );
@@ -137,14 +141,16 @@ impl<'a> DependencyGraph<'a> {
     fn build_indices(
         analyzed_transactions: &[AnalyzedTransaction],
     ) -> (
-        DashMap<&StorageLocation, DashSet<&AnalyzedTransaction>>,
+        DashMap<&StorageLocation, DashMap<&AnalyzedTransaction, ()>>,
         DashMap<&AnalyzedTransaction, usize>,
     ) {
+        // measure the time it takes to build the indices
+        let start = std::time::Instant::now();
         // build an index of the transactions to their indices
-        let read_hint_index: DashMap<&StorageLocation, DashSet<&AnalyzedTransaction>> =
-            DashMap::new();
+        let read_hint_index: DashMap<&StorageLocation, DashMap<&AnalyzedTransaction, ()>> =
+            DashMap::with_shard_amount(128);
         // build an index of the transactions to their indices
-        let txn_index = DashMap::new();
+        let txn_index = DashMap::with_shard_amount(128);
 
         // Iterate through the analyzed transactions
         analyzed_transactions
@@ -157,55 +163,33 @@ impl<'a> DependencyGraph<'a> {
                 // Iterate through the hints
                 for hint in hints {
                     // Get or create the set of transactions associated with this hint
-                    let transactions = read_hint_index.entry(hint).or_insert_with(DashSet::new);
+                    let transactions = read_hint_index
+                        .entry(hint)
+                        .or_insert_with(|| DashMap::with_shard_amount(128));
 
                     // Add the current transaction to the set
-                    transactions.insert(txn);
+                    transactions.insert(txn, ());
                 }
             });
+
+        let duration = start.elapsed();
+        println!("Time elapsed in building indices is: {:?}", duration);
 
         (read_hint_index, txn_index)
-    }
-
-    fn build_hint_index(
-        analyzed_transactions: &[AnalyzedTransaction],
-    ) -> HashMap<&StorageLocation, HashSet<&AnalyzedTransaction>> {
-        let mut read_hint_index: HashMap<&StorageLocation, HashSet<&AnalyzedTransaction>> =
-            HashMap::new();
-        // build an index of the transactions to their indices
-
-        // Iterate through the analyzed transactions
-        analyzed_transactions
-            .iter()
-            .enumerate()
-            .for_each(|(_, txn)| {
-                // Get the hints using the provided closure
-                let hints = txn.read_hints();
-
-                // Iterate through the hints
-                for hint in hints {
-                    // Get or create the set of transactions associated with this hint
-                    let transactions = read_hint_index.entry(hint).or_insert_with(HashSet::new);
-
-                    // Add the current transaction to the set
-                    transactions.insert(txn);
-                }
-            });
-
-        read_hint_index
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::sharded_block_executor::{
+    use crate::{
         test_utils::{
             create_no_dependency_transaction, create_signed_p2p_transaction, generate_test_account,
+            TestAccount,
         },
         transaction_dependency_graph::{DependencyGraph, Node},
     };
-    use dashmap::{DashMap, DashSet};
-    use std::collections::HashSet;
+    use dashmap::DashMap;
+    use std::{collections::HashSet, sync::Mutex};
 
     #[test]
     fn test_single_sender_txns() {
@@ -213,9 +197,13 @@ mod tests {
         let mut receivers = Vec::new();
         let num_txns = 10;
         for _ in 0..num_txns {
-            receivers.push(generate_test_account());
+            let receiver = generate_test_account();
+            receivers.push(receiver);
         }
-        let transactions = create_signed_p2p_transaction(&mut sender, receivers);
+        let transactions = create_signed_p2p_transaction(
+            &mut sender,
+            receivers.iter().collect::<Vec<&TestAccount>>(),
+        );
         let dependency_graph = DependencyGraph::create(&transactions);
         assert_eq!(dependency_graph.size(), num_txns);
         let adjacency_list = dependency_graph.get_adjacency_list();
@@ -223,7 +211,7 @@ mod tests {
         assert_eq!(adjacency_list.len(), num_txns);
         assert_eq!(reverse_adjacency_list.len(), num_txns);
         fn assert_dependencies<'a>(
-            dependencies: &'a DashMap<Node, DashSet<Node>>,
+            dependencies: &'a DashMap<Node, DashMap<Node, ()>>,
             num_txns: usize,
         ) {
             for entry in dependencies.iter() {
@@ -233,7 +221,7 @@ mod tests {
                 let mut expected_indices: HashSet<usize> = (0..=num_txns - 1).collect();
                 expected_indices.remove(&node.index());
                 for dependency in dependencies.iter() {
-                    expected_indices.remove(&dependency.index());
+                    expected_indices.remove(&dependency.key().index());
                 }
                 assert_eq!(expected_indices.len(), 0);
             }
@@ -263,8 +251,8 @@ mod tests {
 
         // Create transactions between senders and receivers
         for (i, sender) in senders.iter_mut().enumerate() {
-            let receiver = receivers[i].clone();
-            let transaction = create_signed_p2p_transaction(sender, vec![receiver.clone()]);
+            let receiver = &receivers[i];
+            let transaction = create_signed_p2p_transaction(sender, vec![receiver]);
             transactions.extend(transaction);
         }
 
@@ -286,14 +274,14 @@ mod tests {
         let mut accounts = Vec::new();
         let num_txns = 10;
         for _ in 0..num_txns {
-            accounts.push(generate_test_account());
+            accounts.push(Mutex::new(generate_test_account()));
         }
         let mut transactions = Vec::new();
 
         for i in 0..num_txns {
-            let mut sender = accounts[i].clone();
-            let receiver = accounts[(i + 1) % num_txns].clone();
-            let transaction = create_signed_p2p_transaction(&mut sender, vec![receiver]);
+            let mut sender = accounts[i].lock().unwrap();
+            let receiver = accounts[(i + 1) % num_txns].lock().unwrap();
+            let transaction = create_signed_p2p_transaction(&mut sender, vec![&receiver]);
             transactions.extend(transaction);
         }
         let dependency_graph = DependencyGraph::create(&transactions);
@@ -304,7 +292,7 @@ mod tests {
         assert_eq!(reverse_adjacency_list.len(), num_txns);
 
         fn assert_dependencies<'a>(
-            dependencies: &'a DashMap<Node, DashSet<Node>>,
+            dependencies: &'a DashMap<Node, DashMap<Node, ()>>,
             num_txns: usize,
         ) {
             for entry in dependencies.iter() {
@@ -317,7 +305,7 @@ mod tests {
                     .into_iter()
                     .collect();
                 for dependency in dependencies.iter() {
-                    expected_indices.remove(&dependency.index());
+                    expected_indices.remove(&dependency.key().index());
                 }
                 assert_eq!(expected_indices.len(), 0);
             }

@@ -1,16 +1,19 @@
 // Copyright © Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::sharded_block_executor::{
-    block_partitioner,
-    block_partitioner::BlockPartitioner,
+use std::collections::HashMap;
+
+use dashmap::DashMap;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+
+use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
+use move_core_types::account_address::AccountAddress;
+
+use crate::{
+    BlockPartitioner,
+    get_shard_for_index,
     transaction_dependency_graph::{DependencyGraph, Node},
 };
-use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
-use dashmap::DashMap;
-use move_core_types::account_address::AccountAddress;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 enum PartitioningStatus {
@@ -33,7 +36,11 @@ struct PartitionerState<'a> {
 // Maintains the state of the depedency-aware partitioner.
 impl<'a> PartitionerState<'a> {
     fn new(transactions: &'a [AnalyzedTransaction], num_shards: usize) -> Self {
+        // print graph creation time
+        let start = std::time::Instant::now();
         let graph = DependencyGraph::create(transactions);
+        let elapsed = start.elapsed();
+        println!("Dependency graph creation time: {}ms", elapsed.as_millis());
         let txns_per_shard = (transactions.len() as f64 / num_shards as f64).ceil() as usize;
         Self {
             transactions,
@@ -48,27 +55,24 @@ impl<'a> PartitionerState<'a> {
         DashMap<usize, PartitioningStatus>,
         DashMap<AccountAddress, usize>,
     ) {
-        let txn_statuses = DashMap::new();
+        let txn_statuses = DashMap::with_shard_amount(128);
         // Discarded senders to the minimum index of the transaction that was discarded.
-        let discarded_senders: DashMap<AccountAddress, usize> = DashMap::new();
+        let discarded_senders: DashMap<AccountAddress, usize> = DashMap::with_shard_amount(128);
         // We traverse the transactions in reverse order because we want to prioritize the transactions
         // at the beginning of the block.
         self.transactions
             .par_iter()
             .enumerate()
             .for_each(|(index, txn)| {
-                let current_shard_index =
-                    block_partitioner::get_shard_for_index(self.txns_per_shard, index);
+                let current_shard_index = get_shard_for_index(self.txns_per_shard, index);
                 let mut is_discarded = false;
                 // For each transaction that is dependent on this transaction, check if that is in the same
                 // shard. If not, we discard this transaction.
                 let dependent_nodes = self.graph.get_dependent_nodes(Node::new(txn, index));
                 if let Some(dependent_nodes) = dependent_nodes {
                     for dependent_node in dependent_nodes.iter() {
-                        let dependent_shard_index = block_partitioner::get_shard_for_index(
-                            self.txns_per_shard,
-                            dependent_node.index(),
-                        );
+                        let dependent_shard_index =
+                            get_shard_for_index(self.txns_per_shard, dependent_node.key().index());
                         match dependent_shard_index.cmp(&current_shard_index) {
                             std::cmp::Ordering::Less => {
                                 is_discarded = true;
@@ -77,10 +81,10 @@ impl<'a> PartitionerState<'a> {
                             std::cmp::Ordering::Greater => {
                                 // Check for cyclic dependency here and if there is don't discard this transaction as
                                 // the dependent transaction will be discarded later.
-                                if !self
-                                    .graph
-                                    .is_cyclic_dependency(Node::new(txn, index), *dependent_node)
-                                {
+                                if !self.graph.is_cyclic_dependency(
+                                    Node::new(txn, index),
+                                    *dependent_node.key(),
+                                ) {
                                     is_discarded = true;
                                     break;
                                 }
@@ -151,7 +155,7 @@ impl BlockPartitioner for DependencyAwareUniformPartitioner {
                     }
                 }
             }
-            let shard_index = block_partitioner::get_shard_for_index(txns_per_shard, index);
+            let shard_index = get_shard_for_index(txns_per_shard, index);
             if txn_statuses.get(&index).unwrap().value() == &PartitioningStatus::Accepted {
                 accepted_txns.entry(shard_index).and_modify(
                     |entry: &mut Vec<(usize, AnalyzedTransaction)>| {
@@ -172,21 +176,21 @@ impl BlockPartitioner for DependencyAwareUniformPartitioner {
 
 #[cfg(test)]
 mod tests {
-    use crate::sharded_block_executor::{
-        block_partitioner::{
-            dependency_aware_partitioner::{DependencyAwareUniformPartitioner, PartitioningStatus},
-            get_shard_for_index, BlockPartitioner,
-        },
+    use std::{collections::HashMap, sync::Mutex};
+
+    use rand::{Rng, rngs::OsRng};
+
+    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
+
+    use crate::{
+        BlockPartitioner,
+        dependency_aware_partitioner::{DependencyAwareUniformPartitioner, PartitioningStatus},
+        get_shard_for_index,
         test_utils::{
             create_non_conflicting_p2p_transaction, create_signed_p2p_transaction,
-            generate_test_account,
-        },
-    };
-    use aptos_types::transaction::analyzed_transaction::AnalyzedTransaction;
-    use rand::{rngs::OsRng, Rng};
-    use std::collections::HashMap;
-    use std::time::Instant;
-    use aptos_logger::log;
+            generate_test_account, TestAccount,
+            },
+        };
 
     fn verify_txn_statuses(
         txn_statuses: &HashMap<usize, PartitioningStatus>,
@@ -275,7 +279,10 @@ mod tests {
         for _ in 0..num_txns {
             receivers.push(generate_test_account());
         }
-        let transactions = create_signed_p2p_transaction(&mut sender, receivers);
+        let transactions = create_signed_p2p_transaction(
+            &mut sender,
+            receivers.iter().collect::<Vec<&TestAccount>>(),
+        );
         let partitioner = DependencyAwareUniformPartitioner {};
         let (accepted_txns, rejected_txns) = partitioner.partition(transactions.clone(), 4);
         // Create a map of transaction index to its expected status, first 3 transactions are expected to be accepted
@@ -337,7 +344,7 @@ mod tests {
         for _ in 0..5 {
             conflicting_transactions.push(
                 create_signed_p2p_transaction(&mut conflicting_sender, vec![
-                    generate_test_account(),
+                    &generate_test_account(),
                 ])
                 .remove(0),
             );
@@ -398,7 +405,7 @@ mod tests {
         let num_accounts = rng.gen_range(1, max_accounts);
         let mut accounts = Vec::new();
         for _ in 0..num_accounts {
-            accounts.push(generate_test_account());
+            accounts.push(Mutex::new(generate_test_account()));
         }
         let num_txns = rng.gen_range(1, max_txns);
         let mut transactions = Vec::new();
@@ -408,9 +415,10 @@ mod tests {
             // randomly select a sender and receiver from accounts
             let sender_index = rng.gen_range(0, num_accounts);
             let receiver_index = rng.gen_range(0, num_accounts);
-            let receiver = accounts[receiver_index].clone();
-            let sender = &mut accounts[sender_index];
-            transactions.push(create_signed_p2p_transaction(sender, vec![receiver]).remove(0));
+            let receiver = accounts.get(receiver_index).unwrap().lock().unwrap();
+            let mut sender = accounts.get(sender_index).unwrap().lock().unwrap();
+            transactions
+                .push(create_signed_p2p_transaction(&mut sender, vec![&receiver]).remove(0));
         }
         let partitioner = DependencyAwareUniformPartitioner {};
         let (accepted_txns, _) = partitioner.partition(transactions.clone(), num_shards);
@@ -435,40 +443,6 @@ mod tests {
     }
 
     #[test]
-    // Generates a bunch of random transactions and ensures that after the partitioning, there is
-    // no conflict across shards.
-    #[ignore]
-    fn test_benchmark() {
-        let mut rng = OsRng;
-        let num_accounts = 1000000;
-        let mut accounts = Vec::new();
-        for _ in 0..num_accounts {
-            accounts.push(generate_test_account());
-        }
-        let num_txns = 100000;
-        let mut transactions = Vec::new();
-        let num_shards = 112;
-
-        for _ in 0..num_txns {
-            // randomly select a sender and receiver from accounts
-            let sender_index = rng.gen_range(0, num_accounts);
-            let receiver_index = rng.gen_range(0, num_accounts);
-            let receiver = accounts[receiver_index].clone();
-            let sender = &mut accounts[sender_index];
-            transactions.push(create_signed_p2p_transaction(sender, vec![receiver]).remove(0));
-        }
-        // profile the time taken
-        println!("Starting to partition");
-        let now = Instant::now();
-        let partitioner = DependencyAwareUniformPartitioner {};
-        let (accepted_txns, _) = partitioner.partition(transactions.clone(), num_shards);
-        let elapsed = now.elapsed();
-        println!("Time taken to partition: {:?}", elapsed);
-        println!("Number of accepted transactions: {}", accepted_txns.len());
-
-    }
-
-    #[test]
     // Test that the partitioner works correctly when there are no transactions.
     // The expectation is that both the accepted and rejected transactions maps will be empty.
     fn test_no_transactions() {
@@ -484,7 +458,9 @@ mod tests {
     // In this case, all transactions should be accepted, and the rejected transactions map should be empty.
     fn test_less_transactions_than_shards() {
         let mut sender = generate_test_account();
-        let receivers = vec![generate_test_account(), generate_test_account()];
+        let receiver1 = generate_test_account();
+        let receiver2 = generate_test_account();
+        let receivers = vec![&receiver1, &receiver2];
         let transactions = create_signed_p2p_transaction(&mut sender, receivers);
         let partitioner = DependencyAwareUniformPartitioner {};
         let (accepted_txns, rejected_txns) = partitioner.partition(transactions, 4);

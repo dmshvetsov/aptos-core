@@ -14,7 +14,7 @@ use move_core_types::{
     account_address::AccountAddress, identifier::Identifier, language_storage::ModuleId,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TestAccount {
     pub account_address: AccountAddress,
     pub private_key: Ed25519PrivateKey,
@@ -61,12 +61,12 @@ pub fn create_non_conflicting_p2p_transaction() -> AnalyzedTransaction {
     // create unique sender and receiver accounts so that there is no conflict
     let mut sender = generate_test_account();
     let receiver = generate_test_account();
-    create_signed_p2p_transaction(&mut sender, vec![receiver]).remove(0)
+    create_signed_p2p_transaction(&mut sender, vec![&receiver]).remove(0)
 }
 
 pub fn create_signed_p2p_transaction(
     sender: &mut TestAccount,
-    receivers: Vec<TestAccount>,
+    receivers: Vec<&TestAccount>,
 ) -> Vec<AnalyzedTransaction> {
     let mut transactions = Vec::new();
     for (_, receiver) in receivers.iter().enumerate() {
