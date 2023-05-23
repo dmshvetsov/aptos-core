@@ -21,9 +21,11 @@ struct Args {
     #[clap(long, default_value = "10")]
     pub num_blocks: usize,
 
-    #[clap(long, default_value = "32")]
+    #[clap(long, default_value = "12")]
     pub num_shards: usize,
 }
+
+
 
 fn main() {
     println!("Starting the block partitioning benchmark");

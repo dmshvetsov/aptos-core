@@ -44,9 +44,11 @@ impl PartitioningShard {
             transactions,
             index_offset,
         } = partition_msg;
+        let mut now = std::time::Instant::now();
         let num_shards = self.messages_txs.len();
-        let dependency_analysis_msg =
-            DependencyAnalyzer::new(self.shard_id, &transactions).get_dependency_analysis_msg();
+
+        let mut conflict_detector = CrossShardConflictDetector::new(self.shard_id, num_shards, &transactions);
+        let dependency_analysis_msg = conflict_detector.get_dependency_analysis_msg();
 
         for i in 0..num_shards {
             if i != self.shard_id {
@@ -57,8 +59,9 @@ impl PartitioningShard {
                     .unwrap();
             }
         }
-        //println!("Time taken for dependency analysis: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
-        let mut conflict_detector = CrossShardConflictDetector::new(self.shard_id, &transactions);
+        println!("Time taken for dependency analysis: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        now = std::time::Instant::now();
+        let mut conflict_detector = CrossShardConflictDetector::new(self.shard_id, num_shards, &transactions);
         // Receive the dependency analysis messages from other shards
         let mut dependency_analysis_msgs = vec![DependencyAnalysisMsg::default(); num_shards];
         for i in 0..num_shards {
@@ -89,7 +92,8 @@ impl PartitioningShard {
                     .unwrap();
             }
         }
-        // println!("Time taken for conflict detection: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        println!("Time taken for conflict detection: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        now = std::time::Instant::now();
         // Receive the discarded sender messages from other shards
         let mut discarded_senders_msgs = vec![DiscardedSendersMsg::default(); num_shards];
         for i in 0..num_shards {
@@ -110,7 +114,8 @@ impl PartitioningShard {
 
         let partitioning_status = conflict_detector
             .discard_discarded_sender_transactions(&transactions, &discarded_senders_msgs);
-        // println!("Time taken for discarding discarded sender: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        println!("Time taken for discarding discarded sender: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        now = std::time::Instant::now();
         // split the transaction into accepted and discarded statuses
         let mut accepted_txns: Vec<(usize, AnalyzedTransaction)> = Vec::new();
         let mut rejected_txns: Vec<(usize, AnalyzedTransaction)> = Vec::new();
@@ -121,7 +126,7 @@ impl PartitioningShard {
                 rejected_txns.push((index_offset + i, txn));
             }
         }
-        // println!("Time taken for splitting transactions: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
+        println!("Time taken for splitting transactions: {:?} for shard_id {:?}", now.elapsed(), self.shard_id);
 
         // send the result back to the controller
         self.result_tx

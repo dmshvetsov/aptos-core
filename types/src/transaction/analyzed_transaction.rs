@@ -7,6 +7,9 @@ use crate::{
     state_store::{state_key::StateKey, table::TableHandle},
     transaction::{SignedTransaction, Transaction, TransactionPayload},
 };
+use aptos_crypto::{
+    hash::{DummyHasher},
+};
 use aptos_crypto::{hash::CryptoHash, HashValue};
 pub use move_core_types::abi::{
     ArgumentABI, ScriptFunctionABI as EntryFunctionABI, TransactionScriptABI, TypeArgumentABI,
@@ -14,7 +17,9 @@ pub use move_core_types::abi::{
 use move_core_types::{
     account_address::AccountAddress, language_storage::StructTag, move_resource::MoveStructType,
 };
+use aptos_crypto_derive::CryptoHasher;
 use std::hash::{Hash, Hasher};
+
 
 #[derive(Clone, Debug)]
 pub struct AnalyzedTransaction {
@@ -31,15 +36,27 @@ pub struct AnalyzedTransaction {
     hash: HashValue,
 }
 
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum StorageLocation {
-    /// A specific storage location denoted by an address and a struct tag.
+    // A specific storage location denoted by an address and a struct tag.
     Specific(StateKey),
-    /// Storage location denoted by a struct tag and any arbitrary address.
-    /// Example read<T>(*), write<T>(*) in Move
+    // Storage location denoted by a struct tag and any arbitrary address.
+    // Example read<T>(*), write<T>(*) in Move
     WildCardStruct(StructTag),
-    /// Storage location denoted by a table handle and any arbitrary item in the table.
+    // Storage location denoted by a table handle and any arbitrary item in the table.
     WildCardTable(TableHandle),
+}
+
+impl CryptoHash for StorageLocation {
+    type Hasher = DummyHasher;
+
+    fn hash(&self) -> HashValue {
+        match self {
+            StorageLocation::Specific(state_key) => CryptoHash::hash(state_key),
+            _ => todo!("hashing of wildcard storage location is not supported yet"),
+        }
+    }
 }
 
 impl AnalyzedTransaction {
