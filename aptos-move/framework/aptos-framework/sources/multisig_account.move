@@ -978,7 +978,7 @@ module aptos_framework::multisig_account {
     }
 
     #[test_only]
-    fun setup() {
+    public fun setup() {
         let framework_signer = &create_signer(@0x1);
         features::change_feature_flags(
             framework_signer, vector[features::get_multisig_accounts_feature()], vector[]);

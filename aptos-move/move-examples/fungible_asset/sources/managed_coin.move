@@ -3,12 +3,14 @@
 /// The address of the asset can be obtained via get_metadata().
 module fungible_asset_extension::managed_coin {
     use aptos_framework::fungible_asset::{Self, MintRef, TransferRef, BurnRef, Metadata, FungibleAsset};
-    use aptos_framework::object::{Self, Object};
+    use aptos_framework::object::{Self, Object, ObjectCore};
     use aptos_framework::primary_fungible_store;
     use std::error;
     use std::signer;
-    use std::string::utf8;
+    use std::string::{utf8, String};
     use std::option;
+    use aptos_framework::multisig_account;
+    use std::option::Option;
 
     /// Only fungible asset metadata owner can make changes.
     const ENOT_OWNER: u64 = 1;
@@ -23,17 +25,40 @@ module fungible_asset_extension::managed_coin {
         burn_ref: BurnRef,
     }
 
-    /// Initialize metadata object and store the refs.
-    fun init_module(admin: &signer) {
-        let constructor_ref = &object::create_named_object(admin, ASSET_SYMBOL);
+
+    public entry fun initialize_with_multisig(creator: &signer,
+                                              additional_owners: vector<address>,
+                                              num_signatures_required: u64,
+                                              maximum_supply: u128,
+                                              name: String,
+                                              symbol: String,
+                                              decimals: u8,
+                                              icon_uri: String,
+                                              project_uri: String,
+    ) {
+        let multisig_address = multisig_account::get_next_multisig_account_address(signer::address_of(creator));
+        multisig_account::create_with_owners(
+            creator,
+            additional_owners,
+            num_signatures_required,
+            vector[],
+            vector[],
+        );
+
+        let constructor_ref = &object::create_named_object(creator, ASSET_SYMBOL);
+
+        // The ideal way is to get the multisig account signer but it is unavailable right now. So the pattern is to
+        // create the metadata object using creator addresss as a partial seed and transfer it to multisig account.
+        object::transfer(creator, object::object_from_constructor_ref<ObjectCore>(constructor_ref), multisig_address);
+
         primary_fungible_store::create_primary_store_enabled_fungible_asset(
             constructor_ref,
-            option::none(),
-            utf8(b"Libra Coin"), /* name */
-            utf8(ASSET_SYMBOL), /* symbol */
-            8, /* decimals */
-            utf8(b"http://example.com/favicon.ico"), /* icon */
-            utf8(b"http://example.com"), /* project */
+            if (maximum_supply == 0) { option::none() } else { option::some(maximum_supply) },
+            name,
+            symbol,
+            decimals,
+            icon_uri,
+            project_uri,
         );
 
         // Create mint/burn/transfer refs to allow creator to manage the fungible asset.
@@ -122,11 +147,12 @@ module fungible_asset_extension::managed_coin {
         borrow_global<ManagedFungibleAsset>(object::object_address(&asset))
     }
 
+    get_next_multisig_account_address
     #[test(creator = @0xcafe)]
     fun test_basic_flow(
         creator: &signer,
     ) acquires ManagedFungibleAsset {
-        init_module(creator);
+        init_test(creator);
         let creator_address = signer::address_of(creator);
         let aaron_address = @0xface;
 
@@ -149,7 +175,7 @@ module fungible_asset_extension::managed_coin {
         creator: &signer,
         aaron: &signer
     ) acquires ManagedFungibleAsset {
-        init_module(creator);
+        init_test(creator);
         let creator_address = signer::address_of(creator);
         mint(aaron, 100, creator_address);
     }
