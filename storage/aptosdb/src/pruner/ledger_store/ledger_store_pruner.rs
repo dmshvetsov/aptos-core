@@ -3,6 +3,7 @@
 
 use crate::{
     db_metadata::DbMetadataSchema,
+    ledger_db::LedgerDb,
     metrics::PRUNER_VERSIONS,
     pruner::{
         db_pruner::DBPruner,
@@ -28,13 +29,17 @@ pub const LEDGER_PRUNER_NAME: &str = "ledger_pruner";
 
 /// Responsible for pruning everything except for the state tree.
 pub(crate) struct LedgerPruner {
-    db: Arc<DB>,
+    ledger_db: Arc<LedgerDb>,
     /// Keeps track of the target version that the pruner needs to achieve.
     target_version: AtomicVersion,
     min_readable_version: AtomicVersion,
-    transaction_store_pruner: Arc<dyn DBSubPruner + Send + Sync>,
-    version_data_pruner: Arc<dyn DBSubPruner + Send + Sync>,
+
+    ledger_metadata_pruner: Arc<dyn DBSubPruner + Send + Sync>,
+
     event_store_pruner: Arc<dyn DBSubPruner + Send + Sync>,
+    transaction_accumulator_pruner: Arc<dyn DBSubPruner + Send + Sync>,
+    transaction_info_pruner: Arc<dyn DBSubPruner + Send + Sync>,
+    transaction_pruner: Arc<dyn DBSubPruner + Send + Sync>,
     write_set_pruner: Arc<dyn DBSubPruner + Send + Sync>,
 }
 
@@ -53,7 +58,7 @@ impl DBPruner for LedgerPruner {
         let current_target_version = self.prune_inner(max_versions, &mut db_batch)?;
         self.save_min_readable_version(current_target_version, &db_batch)?;
         // Commit all the changes to DB atomically
-        self.db.write_schemas(db_batch)?;
+        self.ledger_db.write_schemas(db_batch)?;
 
         // TODO(zcc): recording progress after writing schemas might provide wrong answers to
         // API calls when they query min_readable_version while the write_schemas are still in
@@ -136,12 +141,12 @@ impl DBPruner for LedgerPruner {
 
 impl LedgerPruner {
     pub fn new(
-        db: Arc<DB>,
+        ledger_db: Arc<LedgerDb>,
         transaction_store: Arc<TransactionStore>,
         event_store: Arc<EventStore>,
     ) -> Self {
         let pruner = LedgerPruner {
-            db,
+            ledger_db,
             target_version: AtomicVersion::new(0),
             min_readable_version: AtomicVersion::new(0),
             transaction_store_pruner: Arc::new(TransactionStorePruner::new(

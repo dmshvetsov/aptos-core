@@ -31,7 +31,7 @@ where
 /// A utility function to instantiate the ledger pruner
 pub(crate) fn create_ledger_pruner(ledger_db: Arc<LedgerDb>) -> Arc<LedgerPruner> {
     Arc::new(LedgerPruner::new(
-        ledger_db.metadata_db_arc(),
+        ledger_db,
         Arc::new(TransactionStore::new(Arc::clone(&ledger_db))),
         Arc::new(EventStore::new(ledger_db.event_db_arc())),
     ))
